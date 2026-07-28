@@ -1,18 +1,16 @@
 -- =============================================
--- SCRIPT DE INFLADO PARA ESQUEMA UnTrade
--- Utilizando CTE Recursivas (MySQL 8.0+)
+-- SCRIPT DE INFLADO PARA ESQUEMA UnTrade (V2)
+-- Compatible con Triggers y Restricciones (CHECKS)
 -- =============================================
 
 USE UnTrade;
 
--- Aumentar limite de recursión
+-- Aumentar limite de recursión para permitir inserciones masivas
 SET SESSION cte_max_recursion_depth = 100000;
 
 -- ---------------------------------------------
 -- 1. ENTIDADES FUERTES (Universidades y Categorías)
 -- ---------------------------------------------
-
--- Poblar 100 Universidades
 INSERT INTO UNIVERSIDAD (nombre, pais, dominio_correo)
 WITH RECURSIVE numeros(x) AS (
     SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 100
@@ -20,10 +18,9 @@ WITH RECURSIVE numeros(x) AS (
 SELECT 
     CONCAT('Universidad ', x),
     ELT(1 + FLOOR(RAND() * 5), 'Colombia', 'México', 'Argentina', 'Chile', 'Perú'),
-    CONCAT('@univ', x, '.edu.co') -- Respeta CHECK(dominio_correo LIKE '%@%.%')
+    CONCAT('@univ', x, '.edu.co') 
 FROM numeros;
 
--- Poblar 50 Categorías
 INSERT INTO CATEGORIA (nombre)
 WITH RECURSIVE numeros(x) AS (
     SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 50
@@ -33,8 +30,6 @@ SELECT CONCAT('Categoría ', x) FROM numeros;
 -- ---------------------------------------------
 -- 2. USUARIOS Y SUPERCLASES (10,000 en total)
 -- ---------------------------------------------
-
--- Poblar 10,000 Usuarios
 INSERT INTO USUARIO (id_universidad, nombre_completo, correo_estudiantil, password_hash, fecha_registro)
 WITH RECURSIVE numeros(x) AS (
     SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 10000
@@ -47,7 +42,7 @@ SELECT
     DATE_SUB(CURDATE(), INTERVAL FLOOR(RAND() * 730) DAY)
 FROM numeros;
 
--- Subclase: 500 Administradores (IDs 1 al 500 de USUARIO)
+-- Subclase: 500 Administradores (IDs 1 al 500)
 INSERT INTO ADMINISTRADOR (id_administrador, nivel_permiso, fecha_asignacion, area_soporte)
 WITH RECURSIVE numeros(x) AS (
     SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 500
@@ -59,7 +54,7 @@ SELECT
     ELT(1 + FLOOR(RAND() * 4), 'Técnica', 'Usuarios', 'Finanzas', 'General')
 FROM numeros;
 
--- Subclase: 4,000 Vendedores (IDs 501 al 4500 de USUARIO)
+-- Subclase: 4,000 Vendedores (IDs 501 al 4500)
 INSERT INTO VENDEDOR (id_vendedor, calificacion, ventas_completadas)
 WITH RECURSIVE numeros(x) AS (
     SELECT 501 UNION ALL SELECT x + 1 FROM numeros WHERE x < 4500
@@ -70,7 +65,7 @@ SELECT
     FLOOR(RAND() * 200)
 FROM numeros;
 
--- Subclase: 5,500 Compradores (IDs 4501 al 10000 de USUARIO)
+-- Subclase: 5,500 Compradores (IDs 4501 al 10000)
 INSERT INTO COMPRADOR (id_comprador, preferencias_busqueda)
 WITH RECURSIVE numeros(x) AS (
     SELECT 4501 UNION ALL SELECT x + 1 FROM numeros WHERE x < 10000
@@ -83,8 +78,6 @@ FROM numeros;
 -- ---------------------------------------------
 -- 3. CATÁLOGO E ÍTEMS
 -- ---------------------------------------------
-
--- Poblar 500 Materias
 INSERT INTO MATERIA (id_universidad, nombre_materia, creditos)
 WITH RECURSIVE numeros(x) AS (
     SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 500
@@ -95,47 +88,44 @@ SELECT
     1 + FLOOR(RAND() * 5)
 FROM numeros;
 
--- Poblar 20,000 Publicaciones (50% Productos, 50% Servicios)
+-- Poblar 20,000 Publicaciones (Garantizamos que el vendedor existe)
 INSERT INTO PUBLICACION (id_vendedor, id_administrador_moderador, tipo_item, titulo, descripcion, fecha_publicacion, estado_publicacion)
 WITH RECURSIVE numeros(x) AS (
     SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 20000
 )
 SELECT 
-    501 + FLOOR(RAND() * 4000), -- IDs de Vendedores
-    1 + FLOOR(RAND() * 500),    -- IDs de Administradores
+    501 + FLOOR(RAND() * 4000), 
+    1 + FLOOR(RAND() * 500),    
     IF(x % 2 = 0, 'Producto', 'Servicio'),
     CONCAT('Publicación Comercial ', x),
-    'Descripción autogenerada para pruebas de rendimiento y estrés.',
+    'Descripción autogenerada',
     DATE_SUB(CURDATE(), INTERVAL FLOOR(RAND() * 365) DAY),
     ELT(1 + FLOOR(RAND() * 4), 'Activa', 'Pausada', 'Bloqueada', 'Finalizada')
 FROM numeros;
 
--- Subclase de Publicación: Poblar Productos dinámicamente usando INSERT...SELECT
+-- PRODUCTOS: Se garantiza que el stock NUNCA es cero para evitar que salte el trigger al comprar
 INSERT INTO PRODUCTO (id_publicacion, precio, calificacion, estado_fisico, stock)
 SELECT 
     id_publicacion,
     ROUND(10 + RAND() * 990, 2),
     ROUND(RAND() * 10, 1),
     IF(RAND() > 0.5, 'NUEVO', 'USADO'),
-    FLOOR(RAND() * 100)
+    1 + FLOOR(RAND() * 100) -- <- GARANTIZA STOCK > 0 PARA EL TRIGGER
 FROM PUBLICACION WHERE tipo_item = 'Producto';
 
--- Subclase de Publicación: Poblar Servicios dinámicamente usando INSERT...SELECT
+-- SERVICIOS: Se garantiza que la disponibilidad nunca está en blanco
 INSERT INTO SERVICIO (id_publicacion, modalidad, tarifa_por_hora, disponibilidad_horaria, calificacion)
 SELECT 
     id_publicacion,
     IF(RAND() > 0.5, 'Presencial', 'Virtual'),
     ROUND(15 + RAND() * 150, 2),
-    ELT(1 + FLOOR(RAND() * 4), 'Lunes a Viernes', 'Fines de Semana', 'Nocturno', 'Flexible'),
+    ELT(1 + FLOOR(RAND() * 4), 'Lunes a Viernes', 'Fines de Semana', 'Nocturno', 'Flexible'), -- <- GARANTIZA TEXTO PARA EL TRIGGER
     ROUND(RAND() * 10, 1)
 FROM PUBLICACION WHERE tipo_item = 'Servicio';
 
 -- ---------------------------------------------
 -- 4. TABLAS ASOCIATIVAS (M:N)
 -- ---------------------------------------------
-
--- Generar relaciones Categoría-Producto (aprox. 2 por producto)
--- Usamos IGNORE para evitar duplicados por la aletoriedad
 INSERT IGNORE INTO CATEGORIA_PRODUCTO (id_categoria, id_producto)
 SELECT 
     1 + FLOOR(RAND() * 50),
@@ -143,7 +133,6 @@ SELECT
 FROM PRODUCTO
 CROSS JOIN (SELECT 1 UNION SELECT 2) AS n;
 
--- Generar relaciones Materia-Producto (aprox. 1 por cada producto filtrado)
 INSERT IGNORE INTO MATERIA_PRODUCTO (id_materia, id_producto)
 SELECT 
     1 + FLOOR(RAND() * 500),
@@ -153,9 +142,10 @@ WHERE RAND() > 0.4;
 
 -- ---------------------------------------------
 -- 5. TRANSACCIONES
+-- (Al insertar en Compras, Préstamos y Trueques, 
+-- se dispararán los triggers de auditoría automáticamente)
 -- ---------------------------------------------
 
--- Poblar 30,000 Ofertas
 INSERT INTO OFERTA (id_comprador, id_publicacion, monto_ofertado, fecha_oferta, estado_oferta)
 WITH RECURSIVE numeros(x) AS (
     SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 30000
@@ -168,7 +158,7 @@ SELECT
     ELT(1 + FLOOR(RAND() * 3), 'Pendiente', 'Aceptada', 'Rechazada')
 FROM numeros;
 
--- Poblar 15,000 Préstamos (Respetando orden lógico de fechas mediante rangos disjuntos)
+-- PRÉSTAMOS: Cumpliendo el Check `fecha_inicio > fecha_solicitud` de forma matemática
 INSERT INTO PRESTAMO (id_comprador, id_publicacion, fecha_solicitud, fecha_inicio, fecha_devolucion_pactada, fecha_devolucion_real, estado_prestamo)
 WITH RECURSIVE numeros(x) AS (
     SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 15000
@@ -176,40 +166,41 @@ WITH RECURSIVE numeros(x) AS (
 SELECT 
     4501 + FLOOR(RAND() * 5500),
     1 + FLOOR(RAND() * 20000),
-    DATE_SUB(CURDATE(), INTERVAL (40 + FLOOR(RAND() * 60)) DAY), -- Solicitud hace 40-100 días
-    DATE_SUB(CURDATE(), INTERVAL (20 + FLOOR(RAND() * 19)) DAY), -- Inicio hace 20-39 días
-    DATE_SUB(CURDATE(), INTERVAL (10 + FLOOR(RAND() * 9)) DAY),  -- Pactada hace 10-19 días
-    DATE_SUB(CURDATE(), INTERVAL FLOOR(RAND() * 9) DAY),         -- Real hace 0-9 días
+    DATE_SUB(CURDATE(), INTERVAL (40 + FLOOR(RAND() * 60)) DAY), 
+    DATE_SUB(CURDATE(), INTERVAL (20 + FLOOR(RAND() * 19)) DAY), 
+    DATE_SUB(CURDATE(), INTERVAL (10 + FLOOR(RAND() * 9)) DAY),  
+    DATE_SUB(CURDATE(), INTERVAL FLOOR(RAND() * 9) DAY),         
     ELT(1 + FLOOR(RAND() * 4), 'Solicitado', 'Activo', 'Devuelto', 'Demorado')
 FROM numeros;
 
--- Poblar 25,000 Compras
+-- COMPRAS: Pasan el `trg_validar_disponibilidad_compra` porque el comprador existe, 
+-- la publicación existe, el stock es >0 y la disponibilidad horaria no está vacía.
 INSERT INTO COMPRA (id_comprador, id_publicacion, monto_total, fecha_transaccion, metodo_pago)
 WITH RECURSIVE numeros(x) AS (
     SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 25000
 )
 SELECT 
-    4501 + FLOOR(RAND() * 5500),
-    1 + FLOOR(RAND() * 20000),
+    4501 + FLOOR(RAND() * 5500), -- Rango estricto de IDs de compradores
+    1 + FLOOR(RAND() * 20000),   -- Rango estricto de IDs de publicaciones
     ROUND(10 + RAND() * 2000, 2),
     DATE_SUB(CURDATE(), INTERVAL FLOOR(RAND() * 365) DAY),
     ELT(1 + FLOOR(RAND() * 4), 'Tarjeta', 'PSE', 'Efectivo', 'Cripto')
 FROM numeros;
 
--- Poblar 10,000 Trueques (Evita que el ID de publicación deseada y ofrecida sean el mismo)
+-- TRUEQUES: Garantiza id_publicacion_deseada != id_publicacion_ofrecida
 INSERT INTO TRUEQUE (id_comprador_iniciador, id_publicacion_deseada, id_publicacion_ofrecida, fecha_propuesta, estado_trueque)
 WITH RECURSIVE numeros(x) AS (
     SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 10000
 )
 SELECT 
     4501 + FLOOR(RAND() * 5500),
-    1 + FLOOR(RAND() * 10000),     -- Segmento A
-    10001 + FLOOR(RAND() * 10000), -- Segmento B (Garantiza diferencia)
+    1 + FLOOR(RAND() * 10000),     
+    10001 + FLOOR(RAND() * 10000), 
     DATE_SUB(CURDATE(), INTERVAL FLOOR(RAND() * 365) DAY),
     ELT(1 + FLOOR(RAND() * 3), 'Pendiente', 'Aceptado', 'Rechazado')
 FROM numeros;
 
--- Poblar 5,000 Sanciones (fecha fin >= fecha inicio)
+-- SANCIONES: Garantizando CHECK (fecha_fin >= fecha_inicio)
 INSERT INTO SANCION (id_usuario, id_prestamo, id_administrador, motivo, monto_multa, fecha_inicio, fecha_fin, estado_sancion)
 WITH RECURSIVE numeros(x) AS (
     SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 5000
@@ -220,29 +211,26 @@ SELECT
     1 + FLOOR(RAND() * 500),
     'Violación de términos y condiciones del portal',
     ROUND(RAND() * 500, 2),
-    DATE_SUB(CURDATE(), INTERVAL (60 + FLOOR(RAND()*30)) DAY), -- Inicio hace 60-90 días
-    DATE_SUB(CURDATE(), INTERVAL FLOOR(RAND()*50) DAY),        -- Fin hace 0-50 días
+    DATE_SUB(CURDATE(), INTERVAL (60 + FLOOR(RAND()*30)) DAY), 
+    DATE_SUB(CURDATE(), INTERVAL FLOOR(RAND()*50) DAY),        
     ELT(1 + FLOOR(RAND() * 3), 'Vigente', 'Pagada', 'Expirada')
 FROM numeros;
 
 -- ---------------------------------------------
--- 6. AUDITORÍA
+-- 6. AUDITORÍA MANUAL COMPLEMENTARIA
+-- Nota: Las compras, trueques y préstamos ya se auditaron solos vía Triggers.
+-- Aquí inyectamos logs de tipo "Administrador" para complementar.
 -- ---------------------------------------------
-
--- Poblar 10,000 logs de auditoría 
-INSERT INTO AUDITORIA_TRANSACCIONES (id_compra, id_trueque, id_prestamo, id_administrador, tipo_evento, detalle_evento, fecha_registro, usuario_auditor)
+INSERT INTO AUDITORIA_TRANSACCIONES (id_administrador, tipo_evento, detalle_evento, fecha_registro, usuario_auditor)
 WITH RECURSIVE numeros(x) AS (
-    SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 10000
+    SELECT 1 UNION ALL SELECT x + 1 FROM numeros WHERE x < 5000
 )
 SELECT 
-    IF(RAND() > 0.6, 1 + FLOOR(RAND() * 25000), NULL),
-    IF(RAND() > 0.6, 1 + FLOOR(RAND() * 10000), NULL),
-    IF(RAND() > 0.6, 1 + FLOOR(RAND() * 15000), NULL),
     1 + FLOOR(RAND() * 500),
-    ELT(1 + FLOOR(RAND() * 3), 'Modificación Estado', 'Reversión', 'Consulta Privilegiada'),
-    'Transacción auditada automáticamente por reglas de negocio.',
+    ELT(1 + FLOOR(RAND() * 3), 'BLOQUEO_USUARIO', 'APROBACION_DISPUTA', 'REVISION_CATALOGO'),
+    'Acción administrativa ejecutada en sistema.',
     DATE_SUB(CURDATE(), INTERVAL FLOOR(RAND() * 365) DAY),
-    'Sistema Core'
+    'Admin_Sistema'
 FROM numeros;
 
 -- ---------------------------------------------
